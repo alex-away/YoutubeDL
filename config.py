@@ -1,3 +1,7 @@
+import os
+from logging.handlers import RotatingFileHandler
+import logging
+
 # config.py
 API_ID = 21851558
 API_HASH = "045a99f29cbc003618d9786d0b4683d0"

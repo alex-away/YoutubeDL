@@ -11,26 +11,14 @@ import yt_dlp
 from config import *
 
 # Initialize bot
-class YoutubeBot(Client):
-    def __init__(self):
-        super().__init__(
-            name="youtube_wav_bot",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            bot_token=BOT_TOKEN
-        )
-        self.LOGGER = LOGGER
-        self.MAX_TG_FILE_SIZE = 1932735283  # 1.8 GB in bytes
+app = Client(
+    "youtube_wav_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
-    async def start(self):
-        await super().start()
-        self.LOGGER.info("Bot started")
-        
-    async def stop(self):
-        await super().stop()
-        self.LOGGER.info("Bot stopped")
-
-app = YoutubeBot()
+MAX_TG_FILE_SIZE = 1932735283  # 1.8 GB in bytes
 
 def get_gofile_server():
     """Get best available server for upload"""
@@ -118,7 +106,7 @@ async def download_youtube_wav(url, message):
 
         file_size = os.path.getsize(filename)
         
-        if file_size > app.MAX_TG_FILE_SIZE:
+        if file_size > MAX_TG_FILE_SIZE:
             await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
             
             gofile_link = await asyncio.get_event_loop().run_in_executor(
