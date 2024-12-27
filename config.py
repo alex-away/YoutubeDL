@@ -1,0 +1,17 @@
+# config.py
+API_ID = 21851558
+API_HASH = "045a99f29cbc003618d9786d0b4683d0"
+SESSION_STRING = "AQFNbaYADerHlJEzoFs2v7I5pXNFWD8Alm2_gXdJPCPA-L_k8i1b4Yby4qRP0U74UFLlxeRPZDzLOfV1hD5Cv9BbbKJPCqAlrEWtqVqWH1AdQ6VezrBGdgdmh5SrjG49W5yd5S5XKHTtABmYWS-VpW-fNX8jkpADufZA9iefTuq7nQVY-m5C9tt3om0nDimIdeNCWnHzxTtPbGpaDwM-LXBThWZxKEweecDkqqPJgEyzmaqjlVmqqMfNEAf7Mc-bUbQzTjAz3MdN6YTKgrA1NhkYudlbbc1wavPQ44xQwyrsXncfarIiYyhHCS0YzWhNEw22MOAkx7FO-0ig7EtgZHQQ5lte2gAAAAAkChxkAA"
+BOT_TOKEN = "7647640739:AAGk1I_QdLdj9ym8g8Qz3Bk0BK5id5fKYsc"
+DOWNLOAD_DIR = "downloads/"
+LOG_CHANNEL = -1002237500924
+
+# Optional Configuration
+DOWNLOAD_DIR = "downloads/"
+AUTHORIZED_USERS = ""  # User IDs separated by space
+MAX_TG_FILE_SIZE = 1932735283  # 2GB in bytes
+CHUNK_SIZE = "64"  # In KB
+
+# Command Configuration (Optional)
+START_CMD = "start"
+HELP_CMD = "help"
