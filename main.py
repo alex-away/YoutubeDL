@@ -6,6 +6,7 @@ import os
 import asyncio
 import requests
 import time
+from datetime import datetime
 from config import *
 
 # Initialize bot
@@ -17,7 +18,8 @@ app = Client(
 )
 
 DOWNLOAD_DIR = "downloads/"
-MAX_TG_FILE_SIZE = 1.8 * 1024 * 1024 * 1024  # 1.8 GB in bytes
+MAX_TG_FILE_SIZE = 1932735283  # 1.8 GB in bytes
+COOKIES_FILE = "cookies.txt"  # Path to your cookies file
 
 def get_gofile_server():
     """Get best available server for upload"""
@@ -63,6 +65,7 @@ async def download_youtube_wav(url, message):
     """
     filename = None
     try:
+        # YT-DLP options with cookies
         ydl_opts = {
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -71,6 +74,10 @@ async def download_youtube_wav(url, message):
             }],
             'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
             'quiet': True,
+            'cookiefile': COOKIES_FILE,  # Add cookies file
+            'extract_flat': False,
+            'no_warnings': True,
+            'ignoreerrors': True
         }
 
         await message.edit_text("⏳ Downloading and converting to WAV...")
@@ -80,6 +87,10 @@ async def download_youtube_wav(url, message):
                 None, 
                 lambda: ydl.extract_info(url, download=False)
             )
+            
+            if not info:
+                await message.edit_text("❌ Failed to extract video info. Possibly private or age-restricted video.")
+                return
             
             filename = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
             
