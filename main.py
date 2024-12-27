@@ -1,76 +1,40 @@
-import os
-import asyncio
-import logging
-import requests
-import time
-from datetime import datetime
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.enums import ChatAction
+from pyrogram.types import Message
 import yt_dlp
+import os
+import requests
+import asyncio
 from config import *
 
 # Initialize bot
 app = Client(
-    "youtube_wav_bot",
+    "yt_dl_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-MAX_TG_FILE_SIZE = 1932735283  # 1.8 GB in bytes
+# Create download directory if not exists
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
 
-def get_gofile_server():
-    """Get best available server for upload"""
+def get_cookies():
+    """Download cookies from Gist URL"""
     try:
-        response = requests.get('https://api.gofile.io/accounts/servers')
+        response = requests.get(COOKIES_GIST_URL)
         if response.status_code == 200:
-            data = response.json()
-            if data.get('status') == 'ok' and data.get('data'):
-                return data['data'][0]
-        return 'store1'
-    except:
-        return 'store1'
-
-def upload_to_gofile(filepath):
-    """Upload file to Gofile and return download link"""
-    try:
-        server = get_gofile_server()
-        upload_url = f'https://{server}.gofile.io/uploadFile'
-        
-        with open(filepath, 'rb') as f:
-            files = {'file': (os.path.basename(filepath), f)}
-            headers = {'Accept': 'application/json'}
-            
-            response = requests.post(
-                upload_url,
-                files=files,
-                headers=headers,
-                timeout=300
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == 'ok':
-                    return data['data']['downloadPage']
+            cookies_path = os.path.join(DOWNLOAD_DIR, "cookies.txt")
+            with open(cookies_path, "w") as f:
+                f.write(response.text)
+            return cookies_path
         return None
     except Exception as e:
-        LOGGER.error(f"Gofile upload error: {str(e)}")
+        print(f"Error getting cookies: {str(e)}")
         return None
 
-async def progress(current, total, message):
+async def download_audio(url, message, cookies_path):
+    """Download YouTube audio using cookies"""
     try:
-        percent = (current * 100 / total)
-        await message.edit_text(f"📤 Uploading: {percent:.1f}%")
-    except:
-        pass
-
-async def download_youtube_wav(url, message):
-    """Downloads audio from a YouTube video and converts it to WAV format."""
-    filename = None
-    try:
-        await message.edit_text("🔍 Processing YouTube link...")
-        
         ydl_opts = {
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -78,146 +42,71 @@ async def download_youtube_wav(url, message):
                 'preferredcodec': 'wav',
             }],
             'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-            'cookiesfrombrowser': ('chrome',),  # Gets cookies directly from Chrome
-            'extract_flat': False,
-            'ignoreerrors': True
+            'cookiefile': cookies_path,
         }
 
-        await message.edit_text("⏳ Downloading and converting to WAV...")
+        await message.edit_text("⏳ Downloading...")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.get_event_loop().run_in_executor(
                 None, 
-                lambda: ydl.extract_info(url, download=False)
+                lambda: ydl.extract_info(url, download=True)
             )
-            
-            if not info:
-                await message.edit_text("❌ Failed to extract video info. Possibly private or age-restricted video.")
-                return
             
             filename = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
             
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: ydl.download([url])
-            )
-
-        file_size = os.path.getsize(filename)
-        
-        if file_size > MAX_TG_FILE_SIZE:
-            await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
+            await message.edit_text("📤 Uploading...")
             
-            gofile_link = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: upload_to_gofile(filename)
-            )
-            
-            if gofile_link:
-                success_msg = (
-                    f"✅ File uploaded successfully!\n\n"
-                    f"🎵 {info['title']}\n"
-                    f"📥 Download: {gofile_link}"
-                )
-                await message.edit_text(success_msg)
-                
-                log_text = (
-                    f"#NEW_DOWNLOAD #GOFILE\n\n"
-                    f"**👤 User:** {message.from_user.mention}\n"
-                    f"**🆔 User ID:** `{message.from_user.id}`\n"
-                    f"**🔗 Source URL:** {url}\n"
-                    f"**📤 Output Type:** Gofile Upload\n"
-                    f"**📥 Download Link:** {gofile_link}\n"
-                    f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                await app.send_message(LOG_CHANNEL, log_text)
-            else:
-                await message.edit_text("❌ Failed to upload file to Gofile.")
-        else:
-            await message.edit_text("📤 Uploading WAV file...")
-            await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
-            
-            sent_audio = await app.send_audio(
+            await app.send_audio(
                 chat_id=message.chat.id,
                 audio=filename,
-                caption=f"🎵 {info['title']}",
-                progress=progress,
-                progress_args=(message,)
+                caption=f"🎵 {info['title']}"
             )
             
-            await message.edit_text("✅ Download and conversion completed!")
+            await message.edit_text("✅ Done!")
             
-            log_text = (
-                f"#NEW_DOWNLOAD #TELEGRAM\n\n"
-                f"**👤 User:** {message.from_user.mention}\n"
-                f"**🆔 User ID:** `{message.from_user.id}`\n"
-                f"**🔗 Source URL:** {url}\n"
-                f"**📤 Output Type:** Telegram Audio\n"
-                f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            
-            await app.send_message(LOG_CHANNEL, log_text)
-            await sent_audio.forward(LOG_CHANNEL)
+            # Cleanup
+            if os.path.exists(filename):
+                os.remove(filename)
 
     except Exception as e:
-        error_msg = f"❌ Error: {str(e)}"
-        LOGGER.error(f"Download error: {str(e)}")
-        await message.edit_text(error_msg)
-        
-        log_text = (
-            f"#ERROR\n\n"
-            f"**👤 User:** {message.from_user.mention}\n"
-            f"**🆔 User ID:** `{message.from_user.id}`\n"
-            f"**🔗 Source URL:** {url}\n"
-            f"**❌ Error:** {str(e)}\n"
-            f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        await app.send_message(LOG_CHANNEL, log_text)
-    
-    finally:
-        try:
-            if filename and os.path.exists(filename):
-                os.remove(filename)
-        except:
-            pass
+        await message.edit_text(f"❌ Error: {str(e)}")
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     await message.reply_text(
-        "👋 Welcome to YouTube WAV Downloader Bot!\n\n"
-        "Send me a YouTube link and I'll convert it to WAV format for you.\n"
-        "Use /help to see available commands."
+        "👋 Send me a YouTube link to download it as WAV audio.\n"
+        "Use /help for more information."
     )
 
 @app.on_message(filters.command("help"))
 async def help_command(client, message):
     await message.reply_text(
-        "📖 Available commands:\n\n"
-        "/start - Start the bot\n"
-        "/help - Show this help message\n\n"
-        "Just send a YouTube link to download and convert to WAV format.\n\n"
-        "Features:\n"
-        "• Converts to WAV format\n"
-        "• Supports private/age-restricted videos\n"
-        "• Automatic Gofile upload for large files\n\n"
-        "Note: Files larger than 1.8GB will be uploaded to Gofile."
+        "📖 How to use:\n\n"
+        "Just send me a YouTube link and I'll convert it to WAV format.\n"
+        "The bot uses pre-configured cookies for accessing age-restricted videos."
     )
 
 @app.on_message(filters.regex(r'(https?:\/\/)?((www\.)?youtube\.com|youtu\.be)\/.*'))
 async def youtube_link_handler(client, message):
     url = message.text.strip()
-    status_message = await message.reply_text("🔍 Processing YouTube link...")
+    status_message = await message.reply_text("🔍 Processing...")
+    
+    # Get cookies from Gist
+    cookies_path = get_cookies()
+    if not cookies_path:
+        await status_message.edit_text("❌ Failed to get cookies!")
+        return
     
     try:
-        await download_youtube_wav(url, status_message)
+        await download_audio(url, status_message, cookies_path)
     except Exception as e:
-        LOGGER.error(f"Handler error: {str(e)}")
         await status_message.edit_text(f"❌ Error: {str(e)}")
+    finally:
+        # Cleanup cookies file
+        if os.path.exists(cookies_path):
+            os.remove(cookies_path)
 
 if __name__ == "__main__":
-    try:
-        LOGGER.info("Starting bot...")
-        app.run()
-    except Exception as e:
-        LOGGER.error(f"Bot error: {str(e)}")
+    print("Bot Started!")
+    app.run()
