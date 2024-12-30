@@ -31,20 +31,43 @@ def upload_to_gofile(file_path):
     try:
         # Get best server
         server_response = requests.get('https://api.gofile.io/getServer')
-        server = server_response.json()['data']['server']
-        
-        # Upload URL
-        upload_url = f'https://store1.gofile.io/uploadFile'
-        
-        # Upload file
-        with open(file_path, 'rb') as file:
-            files = {'file': file}
-            response = requests.post(upload_url, files=files)
+        if not server_response.ok:
+            raise Exception('Failed to get server')
             
-        if response.status_code == 200 and response.json()['status'] == 'ok':
-            return response.json()['data']['downloadPage']
-        else:
-            raise Exception('Upload failed')
+        server = server_response.json()['data']['server']
+        print(f"Using server: {server}")
+        
+        # Correct upload URL with server
+        upload_url = f'https://{server}.gofile.io/uploadFile'
+        
+        # Upload file with proper headers and timeout
+        with open(file_path, 'rb') as file:
+            files = {'file': (os.path.basename(file_path), file)}
+            headers = {'accept': 'application/json'}
+            
+            print(f"Uploading to: {upload_url}")
+            response = requests.post(
+                upload_url,
+                files=files,
+                headers=headers,
+                timeout=300  # 5 minute timeout for large files
+            )
+            
+            print(f"Upload response status: {response.status_code}")
+            print(f"Upload response: {response.text[:200]}")  # Print first 200 chars
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'ok':
+                    return data['data']['downloadPage']
+                else:
+                    raise Exception(f"Upload failed: {data.get('status')}")
+            else:
+                raise Exception(f'Upload failed with status code: {response.status_code}')
+    except requests.exceptions.Timeout:
+        raise Exception('Upload timed out - file may be too large')
+    except requests.exceptions.ConnectionError:
+        raise Exception('Connection error - check your internet connection')
     except Exception as e:
         raise Exception(f'Gofile upload error: {str(e)}')
 
@@ -85,16 +108,23 @@ async def download_audio(url, message):
                 await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
                 try:
                     # Upload to Gofile
-                    gofile_url = upload_to_gofile(filename)
+                    await message.edit_text("Uploading to Gofile... This may take a while for large files.")
+                    gofile_url = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: upload_to_gofile(filename)
+                    )
                 
                     # Send message with download link
-                    await message.reply_text(
-                        f"File was too large for Telegram (Size: {file_size_mb:.2f}MB)\n"
-                        f"You can download it from Gofile:\n{gofile_url}"
+                    await message.edit_text(
+                        f"✅ File uploaded successfully!\n\n"
+                        f"📊 File size: {file_size_mb:.2f}MB\n"
+                        f"📥 Download link: {gofile_url}\n\n"
+                        f"Note: Gofile links may expire after some time."
                     )
                 except Exception as e:
-                    await message.reply_text(
-                        f"Error uploading to Gofile: {str(e)}\n"
+                    await message.edit_text(
+                        f"❌ Upload failed!\n\n"
+                        f"Error: {str(e)}\n"
                         f"File size: {file_size_mb:.2f}MB"
                     )
             else:
