@@ -3,6 +3,7 @@ from pyrogram.types import Message
 import yt_dlp
 import os
 import asyncio
+from gofile_uploader import GofileUploader
 from config import *
 
 # Initialize bot
@@ -17,21 +18,10 @@ app = Client(
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
-def setup_cookies():
-    """Setup cookies file"""
-    cookies_path = os.path.join(DOWNLOAD_DIR, "cookies.txt")
-    with open(cookies_path, 'w') as f:
-        f.write(YOUTUBE_COOKIES)
-    return cookies_path
-
 async def download_audio(url, message):
     """Download YouTube audio"""
     filename = None
-    cookies_path = None
-    try:
-        # Setup cookies
-        cookies_path = setup_cookies()
-        
+    try:        
         ydl_opts = {
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -39,7 +29,7 @@ async def download_audio(url, message):
                 'preferredcodec': 'wav',
             }],
             'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-            'cookiefile': cookies_path,
+            'cookiefile': "cookies.txt",
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
@@ -56,15 +46,50 @@ async def download_audio(url, message):
             
             filename = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
             
-            await message.edit_text("📤 Uploading...")
+            # Check file size
+            file_size = os.path.getsize(filename)
+            MAX_TG_SIZE = 1932735283  # 1.8 GB
+
+            if file_size > MAX_TG_SIZE:
+                await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
+                
+                # Initialize Gofile uploader
+                uploader = GofileUploader(message)
+                
+                # Upload to Gofile
+                gofile_link = await uploader.upload_file(filename)
+                
+                success_msg = (
+                    f"✅ File uploaded successfully!\n\n"
+                    f"🎵 {info['title']}\n"
+                    f"📥 Download: {gofile_link}\n\n"
+                    f"Note: Gofile links may expire after some time."
+                )
+                await message.edit_text(success_msg)
+                
+                # Log message
+                log_text = (
+                    f"#NEW_DOWNLOAD #GOFILE\n\n"
+                    f"**👤 User:** {message.from_user.mention}\n"
+                    f"**🆔 User ID:** `{message.from_user.id}`\n"
+                    f"**🔗 Source URL:** {url}\n"
+                    f"**📤 Output Type:** Gofile Upload\n"
+                    f"**📥 Download Link:** {gofile_link}\n"
+                    f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                await app.send_message(LOG_CHANNEL, log_text)
             
-            await app.send_audio(
-                chat_id=message.chat.id,
-                audio=filename,
-                caption=f"🎵 {info['title']}"
-            )
-            
-            await message.edit_text("✅ Done!")
+            else:
+                await message.edit_text("📤 Uploading WAV file...")
+                await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
+                
+                sent_audio = await app.send_audio(
+                    chat_id=message.chat.id,
+                    audio=filename,
+                    caption=f"🎵 {info['title']}"
+                )
+                
+                await message.edit_text("✅ Download and conversion completed!")
 
     except Exception as e:
         await message.edit_text(f"❌ Error: {str(e)}")
@@ -73,8 +98,6 @@ async def download_audio(url, message):
         # Cleanup
         if filename and os.path.exists(filename):
             os.remove(filename)
-        if cookies_path and os.path.exists(cookies_path):
-            os.remove(cookies_path)
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
