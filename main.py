@@ -49,50 +49,40 @@ async def download_audio(url, message):
             
             # Check file size
             file_size = os.path.getsize(filename)
-            MAX_TG_SIZE = 1932735283  # 1.8 GB
 
             if file_size > MAX_TG_SIZE:
                 await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
                 
-                # Initialize GofileUploader
-                gofile = GofileUploader()
+                # Get server and upload
+                server = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    gofile.get_server
+                )
                 
-                # Upload with progress
-                result = await gofile.upload_with_progress(filename, message)
+                gofile_link = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: gofile.upload_file(filename, server)
+                )
                 
-                if result['success']:
+                if gofile_link:
                     success_msg = (
                         f"✅ File uploaded successfully!\n\n"
                         f"🎵 {info['title']}\n"
-                        f"📥 Download: {result['link']}\n\n"
+                        f"📥 Download: {gofile_link}\n\n"
                         f"Note: Gofile links may expire after some time."
                     )
                     await message.edit_text(success_msg)
                 else:
-                    await message.edit_text(f"❌ Upload failed: {result.get('error', 'Unknown error')}")
-                
-                # Log message
-                log_text = (
-                    f"#NEW_DOWNLOAD #GOFILE\n\n"
-                    f"**👤 User:** {message.from_user.mention}\n"
-                    f"**🆔 User ID:** `{message.from_user.id}`\n"
-                    f"**🔗 Source URL:** {url}\n"
-                    f"**📤 Output Type:** Gofile Upload\n"
-                    f"**📥 Download Link:** {result}\n"
-                    f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                await app.send_message(LOG_CHANNEL, log_text)
-            
+                    await message.edit_text("❌ Failed to upload to Gofile.")
             else:
-                await message.edit_text("📤 Uploading WAV file to Telegram...")
-                await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
+                await message.edit_text("📤 Uploading WAV file...")
                 
-                sent_audio = await app.send_document(
-                chat_id=message.chat.id,
-                document=filename,
-                force_document=True,
-                caption=f"🎵 {info['title']}"
-            )
+                await app.send_document(
+                    chat_id=message.chat.id,
+                    doocument=filename,
+                    caption=f"🎵 {info['title']}",
+                    force_document=True
+                )
                 
                 await message.edit_text("✅ Download and conversion completed!")
 
@@ -101,8 +91,11 @@ async def download_audio(url, message):
     
     finally:
         # Cleanup
-        if filename and os.path.exists(filename):
-            os.remove(filename)
+        try:
+            if filename and os.path.exists(filename):
+                os.remove(filename)
+        except:
+            pass
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
