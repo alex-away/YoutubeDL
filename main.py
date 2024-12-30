@@ -3,7 +3,11 @@ from pyrogram.types import Message
 import yt_dlp
 import os
 import asyncio
-from Gofile import GofileUploader
+import subprocess
+import json
+import time
+import requests
+# from Gofile import GofileUploader
 from datetime import datetime
 from config import *
 
@@ -15,9 +19,34 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
+# Constants
+MAX_TG_SIZE = 1932735283  # 1.8 GB in bytes
+
+
 # Create download directory if not exists
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
+
+def upload_to_gofile(file_path):
+    try:
+        # Get best server
+        server_response = requests.get('https://api.gofile.io/getServer')
+        server = server_response.json()['data']['server']
+        
+        # Upload URL
+        upload_url = f'https://store1.gofile.io/uploadFile'
+        
+        # Upload file
+        with open(file_path, 'rb') as file:
+            files = {'file': file}
+            response = requests.post(upload_url, files=files)
+            
+        if response.status_code == 200 and response.json()['status'] == 'ok':
+            return response.json()['data']['downloadPage']
+        else:
+            raise Exception('Upload failed')
+    except Exception as e:
+        raise Exception(f'Gofile upload error: {str(e)}')
 
 async def download_audio(url, message):
     """Download YouTube audio"""
@@ -46,34 +75,28 @@ async def download_audio(url, message):
             )
             
             filename = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
+            file_size = os.path.getsize(filename)
+            file_size_mb = file_size / (1024 * 1024)  # Convert to MB
             
             # Check file size
             file_size = os.path.getsize(filename)
 
             if file_size > MAX_TG_SIZE:
                 await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
+                try:
+                    # Upload to Gofile
+                    gofile_url = upload_to_gofile(filename)
                 
-                # Get server and upload using initialized gofile instance
-                server = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    gofile.get_server
-                )
-                
-                gofile_link = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: gofile.upload_to_gofile(filename, server)  # Changed from upload_file to upload_to_gofile
-                )
-                
-                if gofile_link:
-                    success_msg = (
-                        f"✅ File uploaded successfully!\n\n"
-                        f"🎵 {info['title']}\n"
-                        f"📥 Download: {gofile_link}\n\n"
-                        f"Note: Gofile links may expire after some time."
+                    # Send message with download link
+                    await message.reply_text(
+                        f"File was too large for Telegram (Size: {file_size_mb:.2f}MB)\n"
+                        f"You can download it from Gofile:\n{gofile_url}"
                     )
-                    await message.edit_text(success_msg)
-                else:
-                    await message.edit_text("❌ Failed to upload to Gofile.")
+                except Exception as e:
+                    await message.reply_text(
+                        f"Error uploading to Gofile: {str(e)}\n"
+                        f"File size: {file_size_mb:.2f}MB"
+                    )
             else:
                 await message.edit_text("📤 Uploading WAV file...")
                 
