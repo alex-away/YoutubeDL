@@ -106,7 +106,7 @@ async def download_audio(url, message):
                     
                     while True:
                         current_time = time.time()
-                        if current_time - last_update >= 4:  # Update every 4 seconds
+                        if current_time - last_update >= 5:  # Update every 5 seconds
                             elapsed = int(current_time - upload_start)
                             await progress_msg.edit_text(f"Uploading to Gofile... ({elapsed}s elapsed)\nPlease wait, large files may take several minutes.")
                             last_update = current_time
@@ -122,7 +122,7 @@ async def download_audio(url, message):
                             raise Exception("Upload timed out after 10 minutes")
                         
                     await message.delete()  # Delete the progress message
-                    await message.send_message(
+                    await app.send_message(
                         f"<b>✅ Upload Successful</b>\n\n"
                              f"<b>🎵 Title:</b> {info['title']}\n"
                              f"<b>📊 Size:</b> {file_size_mb:.2f}MB\n"
@@ -134,7 +134,7 @@ async def download_audio(url, message):
                 except Exception as e:
                     await message.edit_text(f"❌ Upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
             else:
-                await message.edit_text("📤 Uploading WAV file...")
+                await message.edit_text("📤 Uploading WAV file to Telegram...")
 
                 await app.send_document(
                     chat_id=message.chat.id,
@@ -144,6 +144,8 @@ async def download_audio(url, message):
                 )
 
                 await message.edit_text("✅ Download and conversion completed!")
+                time.sleep(5)  # Wait for 1 second before deleting the message
+                await message.delete()
 
     except Exception as e:
         await message.edit_text(f"❌ Error: {str(e)}")
@@ -169,9 +171,8 @@ def check_auth(func):
 @check_auth
 async def start_command(client, message):
     await message.reply_text(
-        "👋 Send me a YouTube link to download it as WAV audio.\n"
-    
-           "Use /help for more information."
+        f"👋 Hello {message.from_user.mention}!\n\n"
+        f"Send me a YouTube link to download it as WAV audio.\n"
     )
 
 @app.on_message(filters.command("help"))
@@ -179,7 +180,7 @@ async def start_command(client, message):
 async def help_command(client, message):
     await message.reply_text(
         "📖 How to use:\n\n"
-        "Just send me a YouTube link and I'll convert it to WAV format."
+        "Just send me a YouTube link and I'll convert it to WAV format. if file is too large, I'll automatically upload it to Gofile."
     )
 
 @app.on_message(filters.regex(r'(https?:\/\/)?((www\.)?youtube\.com|youtu\.be)\/.*'))
