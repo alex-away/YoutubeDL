@@ -120,11 +120,16 @@ async def download_audio(url, message):
                             break
                         except asyncio.TimeoutError:
                             raise Exception("Upload timed out after 10 minutes")
-                    
-                    await message.edit_text(
-                        f"✅ File uploaded successfully!\n"
-                        f"📊 Size: {file_size_mb:.2f}MB\n"
-                        f"📥 Download: {gofile_url}"
+                        
+                    await message.delete()  # Delete the progress message
+                    await message.send_message(
+                        f"<b>✅ Upload Successful</b>\n\n"
+                             f"<b>🎵 Title:</b> {info['title']}\n"
+                             f"<b>📊 Size:</b> {file_size_mb:.2f}MB\n"
+                             f"<b>📥 Download:</b> <a href='{gofile_url}'>Click Here</a>\n\n"
+                             f"<i>Note: Gofile links will expire after some time.</i>",
+                        disable_web_page_preview=False,
+                        parse_mode="HTML"
                     )
                 except Exception as e:
                     await message.edit_text(f"❌ Upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
