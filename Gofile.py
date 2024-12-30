@@ -1,89 +1,134 @@
 import os
-import time
-import aiohttp
 import requests
+import asyncio
+from datetime import datetime
 
 class GofileUploader:
-    def __init__(self, status_msg):
-        self.status_msg = status_msg
-        self.last_update_time = 0
-        self.update_interval = 3  # seconds
+    def __init__(self):
+        self.MAX_RETRIES = 3
 
-    async def update_progress(self, current, total):
-        current_time = time.time()
-        if current_time - self.last_update_time > self.update_interval:
-            percentage = (current / total) * 100
-            speed = current / (current_time - self.start_time)
+    def get_server(self):
+        """Get best available server for upload with debug info"""
+        try:
+            # Updated API endpoint
+            response = requests.get('https://api.gofile.io/accounts/servers')
+            print(f"Server Response Status: {response.status_code}")
+            print(f"Server Response: {response.text}")
+
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'ok' and data.get('data'):
+                    # Return the first available server
+                    return data['data'][0]
+            # Fallback to direct server
+            return 'store1'
+        except Exception as e:
+            print(f"Error getting server: {str(e)}")
+            # Fallback servers list
+            return 'store1'
+
+    async def upload_to_gofile(self, filepath, progress_callback=None):
+        """Upload file to Gofile and return download link"""
+        try:
+            server = self.get_server()
+            upload_url = f'https://{server}.gofile.io/uploadFile'
             
-            def format_size(size):
-                for unit in ['B', 'KB', 'MB', 'GB']:
-                    if size < 1024:
-                        return f"{size:.2f}{unit}"
-                    size /= 1024
-                return f"{size:.2f}TB"
+            for retry in range(self.MAX_RETRIES):
+                try:
+                    with open(filepath, 'rb') as f:
+                        files = {'file': (os.path.basename(filepath), f)}
+                        headers = {'Accept': 'application/json'}
+                        
+                        # If progress callback is provided
+                        if progress_callback:
+                            total_size = os.path.getsize(filepath)
+                            current_size = 0
+                            
+                            class ProgressFile:
+                                def __init__(self, file, total, callback):
+                                    self.file = file
+                                    self.total = total
+                                    self.current = 0
+                                    self.callback = callback
+                                
+                                def read(self, size):
+                                    data = self.file.read(size)
+                                    self.current += len(data)
+                                    if self.callback:
+                                        asyncio.create_task(
+                                            self.callback(self.current, self.total)
+                                        )
+                                    return data
+
+                            files['file'] = (
+                                os.path.basename(filepath),
+                                ProgressFile(f, total_size, progress_callback)
+                            )
+                        
+                        response = requests.post(
+                            upload_url,
+                            files=files,
+                            headers=headers,
+                            timeout=300
+                        )
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('status') == 'ok':
+                                return {
+                                    'success': True,
+                                    'link': data['data']['downloadPage'],
+                                    'directLink': data['data'].get('directLink'),
+                                    'fileName': data['data'].get('fileName')
+                                }
+                        
+                        print(f"Upload attempt {retry + 1} failed. Status: {response.status_code}")
+                        
+                except Exception as e:
+                    print(f"Upload attempt {retry + 1} failed: {str(e)}")
+                    if retry < self.MAX_RETRIES - 1:
+                        await asyncio.sleep(5)  # Wait before retry
+                    continue
             
-            current_size = format_size(current)
-            total_size = format_size(total)
-            speed_str = format_size(speed) + "/s"
+            return {
+                'success': False,
+                'error': 'Max retries exceeded'
+            }
             
+        except Exception as e:
+            print(f"Gofile upload error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def format_size(self, size):
+        """Format size in bytes to human readable format"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024:
+                return f"{size:.2f}{unit}"
+            size /= 1024
+        return f"{size:.2f}PB"
+
+    async def upload_with_progress(self, filepath, message):
+        """Upload file with progress updates"""
+        start_time = datetime.now()
+        
+        async def progress_callback(current, total):
             try:
-                await self.status_msg.edit_text(
+                percentage = (current * 100) / total
+                elapsed_time = (datetime.now() - start_time).seconds
+                speed = current / elapsed_time if elapsed_time > 0 else 0
+                
+                await message.edit_text(
                     f"📤 Uploading to Gofile...\n"
                     f"📊 Progress: {percentage:.1f}%\n"
-                    f"📦 Size: {current_size}/{total_size}\n"
-                    f"⚡️ Speed: {speed_str}"
+                    f"📦 Size: {self.format_size(current)}/{self.format_size(total)}\n"
+                    f"⚡️ Speed: {self.format_size(speed)}/s\n"
+                    f"⏱ Elapsed: {elapsed_time}s"
                 )
-            except Exception:
-                pass
-            
-            self.last_update_time = current_time
-
-    async def upload_file(self, file_path):
-        try:
-            # Get best server
-            server_response = requests.get('https://api.gofile.io/getServer')
-            if server_response.status_code != 200:
-                raise Exception("Failed to get Gofile server")
-            
-            server = server_response.json()['data']['server']
-            upload_url = f'https://{server}.gofile.io/uploadFile'
-
-            # Get file size
-            total_size = os.path.getsize(file_path)
-            
-            # Initialize upload
-            self.start_time = time.time()
-            
-            class ProgressFile:
-                def __init__(self, path, callback):
-                    self.path = path
-                    self.callback = callback
-                    self.current_size = 0
-                    self.total_size = os.path.getsize(path)
-
-                async def read(self, chunk_size):
-                    with open(self.path, 'rb') as f:
-                        while True:
-                            chunk = f.read(chunk_size)
-                            if not chunk:
-                                break
-                            self.current_size += len(chunk)
-                            await self.callback(self.current_size, self.total_size)
-                            yield chunk
-
-            async with aiohttp.ClientSession() as session:
-                form = aiohttp.FormData()
-                form.add_field('file',
-                             ProgressFile(file_path, self.update_progress),
-                             filename=os.path.basename(file_path))
-                
-                async with session.post(upload_url, data=form) as response:
-                    result = await response.json()
-                    
-                    if response.status == 200 and result['status'] == 'ok':
-                        return result['data']['downloadPage']
-                    else:
-                        raise Exception(f'Upload failed: {result.get("status")}')
-                        
-        except Exception as e:
-            raise Exception(f'Gofile upload error: {str(e)}')
+            except Exception as e:
+                print(f"Progress update error: {str(e)}")
+        
+        result = await self.upload_to_gofile(filepath, progress_callback)
+        return result

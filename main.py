@@ -3,7 +3,8 @@ from pyrogram.types import Message
 import yt_dlp
 import os
 import asyncio
-from gofile_uploader import GofileUploader
+from Gofile import GofileUploader
+from datetime import datetime
 from config import *
 
 # Initialize bot
@@ -53,19 +54,22 @@ async def download_audio(url, message):
             if file_size > MAX_TG_SIZE:
                 await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
                 
-                # Initialize Gofile uploader
-                uploader = GofileUploader(message)
+                # Initialize GofileUploader
+                gofile = GofileUploader()
                 
-                # Upload to Gofile
-                gofile_link = await uploader.upload_file(filename)
+                # Upload with progress
+                result = await gofile.upload_with_progress(filename, message)
                 
-                success_msg = (
-                    f"✅ File uploaded successfully!\n\n"
-                    f"🎵 {info['title']}\n"
-                    f"📥 Download: {gofile_link}\n\n"
-                    f"Note: Gofile links may expire after some time."
-                )
-                await message.edit_text(success_msg)
+                if result['success']:
+                    success_msg = (
+                        f"✅ File uploaded successfully!\n\n"
+                        f"🎵 {info['title']}\n"
+                        f"📥 Download: {result['link']}\n\n"
+                        f"Note: Gofile links may expire after some time."
+                    )
+                    await message.edit_text(success_msg)
+                else:
+                    await message.edit_text(f"❌ Upload failed: {result.get('error', 'Unknown error')}")
                 
                 # Log message
                 log_text = (
@@ -74,20 +78,21 @@ async def download_audio(url, message):
                     f"**🆔 User ID:** `{message.from_user.id}`\n"
                     f"**🔗 Source URL:** {url}\n"
                     f"**📤 Output Type:** Gofile Upload\n"
-                    f"**📥 Download Link:** {gofile_link}\n"
+                    f"**📥 Download Link:** {result}\n"
                     f"**⏰ Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
                 await app.send_message(LOG_CHANNEL, log_text)
             
             else:
-                await message.edit_text("📤 Uploading WAV file...")
+                await message.edit_text("📤 Uploading WAV file to Telegram...")
                 await app.send_chat_action(message.chat.id, ChatAction.UPLOAD_AUDIO)
                 
-                sent_audio = await app.send_audio(
-                    chat_id=message.chat.id,
-                    audio=filename,
-                    caption=f"🎵 {info['title']}"
-                )
+                sent_audio = await app.send_document(
+                chat_id=message.chat.id,
+                document=filename,
+                force_document=True,
+                caption=f"🎵 {info['title']}"
+            )
                 
                 await message.edit_text("✅ Download and conversion completed!")
 
