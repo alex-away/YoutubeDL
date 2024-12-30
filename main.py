@@ -53,7 +53,7 @@ async def download_audio(url, message):
             if file_size > MAX_TG_SIZE:
                 await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
                 
-                # Get server and upload
+                # Get server and upload using initialized gofile instance
                 server = await asyncio.get_event_loop().run_in_executor(
                     None,
                     gofile.get_server
@@ -61,7 +61,7 @@ async def download_audio(url, message):
                 
                 gofile_link = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: gofile.upload_file(filename, server)
+                    lambda: gofile.upload_to_gofile(filename, server)  # Changed from upload_file to upload_to_gofile
                 )
                 
                 if gofile_link:
@@ -79,7 +79,7 @@ async def download_audio(url, message):
                 
                 await app.send_document(
                     chat_id=message.chat.id,
-                    doocument=filename,
+                    document=filename,
                     caption=f"🎵 {info['title']}",
                     force_document=True
                 )

@@ -1,12 +1,8 @@
 import os
 import requests
-import asyncio
 from datetime import datetime
 
 class GofileUploader:
-    def __init__(self):
-        self.MAX_RETRIES = 3
-
     def get_server(self):
         """Get best available server for upload with debug info"""
         try:
@@ -27,80 +23,57 @@ class GofileUploader:
             # Fallback servers list
             return 'store1'
 
-    async def upload_to_gofile(self, filepath, progress_callback=None):
-        """Upload file to Gofile and return download link"""
-        try:
-            server = self.get_server()
-            upload_url = f'https://{server}.gofile.io/uploadFile'
-            
-            for retry in range(self.MAX_RETRIES):
-                try:
-                    with open(filepath, 'rb') as f:
-                        files = {'file': (os.path.basename(filepath), f)}
-                        headers = {'Accept': 'application/json'}
-                        
-                        # If progress callback is provided
-                        if progress_callback:
-                            total_size = os.path.getsize(filepath)
-                            current_size = 0
-                            
-                            class ProgressFile:
-                                def __init__(self, file, total, callback):
-                                    self.file = file
-                                    self.total = total
-                                    self.current = 0
-                                    self.callback = callback
-                                
-                                def read(self, size):
-                                    data = self.file.read(size)
-                                    self.current += len(data)
-                                    if self.callback:
-                                        asyncio.create_task(
-                                            self.callback(self.current, self.total)
-                                        )
-                                    return data
+    def upload_to_gofile(self, filepath, server):  # Changed method name to match what's being called
+        """Upload a single file and return the download link"""
+        if not os.path.exists(filepath):
+            print(f"File not found: {filepath}")
+            return None
 
-                            files['file'] = (
-                                os.path.basename(filepath),
-                                ProgressFile(f, total_size, progress_callback)
-                            )
-                        
-                        response = requests.post(
-                            upload_url,
-                            files=files,
-                            headers=headers,
-                            timeout=300
-                        )
-                        
-                        if response.status_code == 200:
-                            data = response.json()
-                            if data.get('status') == 'ok':
-                                return {
-                                    'success': True,
-                                    'link': data['data']['downloadPage'],
-                                    'directLink': data['data'].get('directLink'),
-                                    'fileName': data['data'].get('fileName')
-                                }
-                        
-                        print(f"Upload attempt {retry + 1} failed. Status: {response.status_code}")
-                        
-                except Exception as e:
-                    print(f"Upload attempt {retry + 1} failed: {str(e)}")
-                    if retry < self.MAX_RETRIES - 1:
-                        await asyncio.sleep(5)  # Wait before retry
-                    continue
-            
-            return {
-                'success': False,
-                'error': 'Max retries exceeded'
-            }
-            
+        try:
+            # Test server connection before upload
+            try:
+                test_conn = requests.get(f'https://{server}.gofile.io', timeout=5)
+            except:
+                print(f"Cannot connect to {server}, trying alternate server...")
+                server = 'store1'  # Fallback server
+
+            print(f"Uploading to server: {server}")
+
+            with open(filepath, 'rb') as f:
+                # Updated API endpoint
+                upload_url = f'https://{server}.gofile.io/uploadFile'
+                files = {'file': (os.path.basename(filepath), f)}
+
+                # Add headers and longer timeout
+                headers = {
+                    'Accept': 'application/json',
+                }
+
+                response = requests.post(
+                    upload_url,
+                    files=files,
+                    headers=headers,
+                    timeout=300  # 5 minute timeout for large files
+                )
+
+                print(f"Upload Response Status: {response.status_code}")
+                print(f"Upload Response: {response.text[:200]}...")  # Print first 200 chars of response
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'ok':
+                        return data['data']['downloadPage']
+                print(f"Upload failed for {filepath}")
+                return None
+        except requests.exceptions.Timeout:
+            print(f"Timeout uploading {filepath} - file may be too large")
+            return None
+        except requests.exceptions.ConnectionError:
+            print(f"Connection error uploading {filepath} - check your internet connection")
+            return None
         except Exception as e:
-            print(f"Gofile upload error: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            print(f"Error uploading {filepath}: {str(e)}")
+            return None
 
     def format_size(self, size):
         """Format size in bytes to human readable format"""
