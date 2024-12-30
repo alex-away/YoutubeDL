@@ -98,41 +98,47 @@ async def download_audio(url, message):
 
             if file_size > MAX_TG_SIZE:
                 progress_msg = await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
-                
+
                 try:
                     # Keep session alive with progress updates
                     upload_start = time.time()
                     last_update = upload_start
-                    
+
                     while True:
                         current_time = time.time()
                         if current_time - last_update >= 5:  # Update every 5 seconds
                             elapsed = int(current_time - upload_start)
                             await progress_msg.edit_text(f"Uploading to Gofile... ({elapsed}s elapsed)\nPlease wait, large files may take several minutes.")
                             last_update = current_time
-                            
+
                         # Try upload with timeout
                         try:
                             gofile_url = await asyncio.wait_for(
                                 asyncio.get_event_loop().run_in_executor(None, lambda: upload_to_gofile(filename)),
-                                timeout=600  # 10 minute timeout
+                                timeout=1000  # 10 minute timeout
                             )
                             break
                         except asyncio.TimeoutError:
                             raise Exception("Upload timed out after 10 minutes")
-                        
-                    await message.delete()  # Delete the progress message
+
+                    # Send new message instead of editing
                     await app.send_message(
-                        f"<b>✅ Upload Successful</b>\n\n"
+                        chat_id=message.chat.id,
+                        text=f"<b>✅ Upload Successful</b>\n\n"
                              f"<b>🎵 Title:</b> {info['title']}\n"
                              f"<b>📊 Size:</b> {file_size_mb:.2f}MB\n"
                              f"<b>📥 Download:</b> <a href='{gofile_url}'>Click Here</a>\n\n"
                              f"<i>Note: Gofile links will expire after some time.</i>",
-                        disable_web_page_preview=False,
-                        parse_mode="HTML"
+                        disable_web_page_preview=True,
                     )
+                    # Try to delete progress message after sending new message
+                    try:
+                        await progress_msg.delete()
+                    except:
+                        pass
+
                 except Exception as e:
-                    await message.edit_text(f"❌ Upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
+                    await message.reply_text(f"❌ Upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
             else:
                 await message.edit_text("📤 Uploading WAV file to Telegram...")
 
@@ -146,7 +152,6 @@ async def download_audio(url, message):
                 await message.edit_text("✅ Download and conversion completed!")
                 time.sleep(5)  # Wait for 1 second before deleting the message
                 await message.delete()
-
     except Exception as e:
         await message.edit_text(f"❌ Error: {str(e)}")
     
