@@ -1,5 +1,5 @@
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 import yt_dlp
 import os
 import asyncio
@@ -70,16 +70,33 @@ def upload_to_gofile(file_path):
     except Exception as e:
         raise Exception(f'Gofile upload error: {str(e)}')
 
-async def download_audio(url, message):
-    """Download YouTube audio"""
+async def fetch_formats(url):
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'ignoreerrors': True
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+
+    formats = {}
+    for f in info['formats']:
+        if f['ext'] in ['mp4', 'webm']:
+            height = f.get('height', 0)
+            if height not in formats:
+                formats[height] = {}
+            formats[height][f['ext']] = f['format_id']
+
+    formats['best_video'] = 'bestvideo+bestaudio'
+    return formats
+
+async def download_audio(url, message, format_id):
+    """Download YouTube audio and convert to MP3/WAV"""
     filename = None
     try:        
         ydl_opts = {
             'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-            }],
             'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
             'cookiefile': "cookies.txt",
             'quiet': True,
@@ -92,36 +109,41 @@ async def download_audio(url, message):
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-            filename = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
-            file_size = os.path.getsize(filename)
+            filename = ydl.prepare_filename(info)
+
+        mp3_file = filename.rsplit(".", 1)[0] + ".mp3"
+        wav_file = filename.rsplit(".", 1)[0] + ".wav"
+
+        subprocess.run(['ffmpeg', '-i', filename, '-acodec', 'libmp3lame', '-b:a', '192k', mp3_file], check=True)
+        subprocess.run(['ffmpeg', '-i', filename, wav_file], check=True)
+
+        for audio_file, ext in [(mp3_file, 'mp3'), (wav_file, 'wav')]:
+            file_size = os.path.getsize(audio_file)
             file_size_mb = file_size / (1024 * 1024)
 
             if file_size > MAX_TG_SIZE:
-                progress_msg = await message.edit_text("📤 File too large for Telegram. Uploading to Gofile...")
+                progress_msg = await message.edit_text(f"📤 {ext.upper()} file too large for Telegram. Uploading to Gofile...")
 
                 try:
-                    # Keep session alive with progress updates
                     upload_start = time.time()
                     last_update = upload_start
 
                     while True:
                         current_time = time.time()
-                        if current_time - last_update >= 5:  # Update every 5 seconds
+                        if current_time - last_update >= 5:
                             elapsed = int(current_time - upload_start)
                             await progress_msg.edit_text(f"Uploading to Gofile... ({elapsed}s elapsed)\nPlease wait, large files may take several minutes.")
                             last_update = current_time
 
-                        # Try upload with timeout
                         try:
                             gofile_url = await asyncio.wait_for(
-                                asyncio.get_event_loop().run_in_executor(None, lambda: upload_to_gofile(filename)),
-                                timeout=1000  # 10 minute timeout
+                                asyncio.get_event_loop().run_in_executor(None, lambda: upload_to_gofile(audio_file)),
+                                timeout=1000
                             )
                             break
                         except asyncio.TimeoutError:
                             raise Exception("Upload timed out after 10 minutes")
 
-                    # Send new message instead of editing
                     await app.send_message(
                         chat_id=message.chat.id,
                         text=f"<b>✅ Upload Successful</b>\n\n"
@@ -131,35 +153,38 @@ async def download_audio(url, message):
                              f"<i>Note: Gofile links will expire after some time.</i>",
                         disable_web_page_preview=True,
                     )
-                    # Try to delete progress message after sending new message
                     try:
                         await progress_msg.delete()
                     except:
                         pass
 
                 except Exception as e:
-                    await message.reply_text(f"❌ Upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
+                    await message.reply_text(f"❌ {ext.upper()} upload failed!\nError: {str(e)}\nSize: {file_size_mb:.2f}MB")
             else:
-                await message.edit_text("📤 Uploading WAV file to Telegram...")
+                await message.edit_text(f"📤 Uploading {ext.upper()} file to Telegram...")
 
                 await app.send_document(
                     chat_id=message.chat.id,
-                    document=filename,
-                    caption=f"🎵 {info['title']}",
+                    document=audio_file,
+                    caption=f"🎵 {info['title']} ({ext.upper()})",
                     force_document=True
                 )
 
-                await message.edit_text("✅ Download and conversion completed!")
-                time.sleep(5)  # Wait for 1 second before deleting the message
-                await message.delete()
+        await message.edit_text("✅ Download and conversion completed!")
+        time.sleep(5)
+        await message.delete()
+
     except Exception as e:
         await message.edit_text(f"❌ Error: {str(e)}")
     
     finally:
-        # Cleanup
         try:
             if filename and os.path.exists(filename):
                 os.remove(filename)
+            if mp3_file and os.path.exists(mp3_file):
+                os.remove(mp3_file)
+            if wav_file and os.path.exists(wav_file):
+                os.remove(wav_file)
         except:
             pass
 
@@ -192,12 +217,46 @@ async def help_command(client, message):
 @check_auth
 async def youtube_link_handler(client, message):
     url = message.text.strip()
-    status_message = await message.reply_text("🔍 Processing...")
+    status_message = await message.reply_text("🔍 Fetching available formats...")
     
     try:
-        await download_audio(url, status_message)
+        formats = await fetch_formats(url)
+        
+        buttons = [
+            [
+                InlineKeyboardButton("🎵 MP3", callback_data="download_mp3"),
+                InlineKeyboardButton("🎵 WAV", callback_data="download_wav")  
+            ]
+        ]
+
+        heights = [1080, 720, 480, 360, 240, 144]
+        for height in heights:
+            if height in formats:
+                row = []
+                if 'mp4' in formats[height]:
+                    row.append(InlineKeyboardButton(f"{height}p MP4", callback_data=f"download_{formats[height]['mp4']}"))
+                if 'webm' in formats[height]:
+                    row.append(InlineKeyboardButton(f"{height}p WEBM", callback_data=f"download_{formats[height]['webm']}"))
+                if row:
+                    buttons.append(row)
+
+        buttons.append([InlineKeyboardButton("Best Video", callback_data=f"download_{formats['best_video']}")])
+
+        await status_message.edit_text("Select a format to download:", reply_markup=InlineKeyboardMarkup(buttons))
+
     except Exception as e:
         await status_message.edit_text(f"❌ Error: {str(e)}")
+
+@app.on_callback_query(filters.regex("^download_"))
+async def download_button_handler(client, callback_query):
+    format_id = callback_query.data.split("_")[1]
+    message_text = callback_query.message.text
+    if ": " in message_text:
+        url = message_text.split(": ")[1]
+        await callback_query.message.edit_text(f"⏳ Downloading {format_id.upper()}...")
+        await download_audio(url, callback_query.message, format_id)
+    else:
+        await callback_query.answer("❌ Invalid message format")
 
 if __name__ == "__main__":
     print("Bot Started!")
