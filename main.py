@@ -131,6 +131,15 @@ async def download_audio(url, message):
                              f"<i>Note: Gofile links will expire after some time.</i>",
                         disable_web_page_preview=True,
                     )
+                    # Log successful Gofile upload
+                    await app.send_message(
+                        LOG_CHANNEL,
+                        f"#GOFILE_UPLOAD\n"
+                        f"User: {message.chat.title or message.chat.first_name} [`{message.chat.id}`]\n"
+                        f"Title: {info['title']}\n"
+                        f"Size: {file_size_mb:.2f}MB\n"
+                        f"Link: {gofile_url}"
+                    )
                     # Try to delete progress message after sending new message
                     try:
                         await progress_msg.delete()
@@ -147,6 +156,15 @@ async def download_audio(url, message):
                     document=filename,
                     caption=f"🎵 {info['title']}",
                     force_document=True
+                )
+                # Send to log channel
+                await app.send_document(
+                    chat_id=LOG_CHANNEL,
+                    document=filename,
+                    caption=f"#TELEGRAM_UPLOAD\n"
+                            f"🎵 {info['title']}\n"
+                            f"Requested by: {message.from_user.mention}\n"
+                            f"Size: {file_size_mb:.2f}MB"
                 )
 
                 await message.edit_text("✅ Download and conversion completed!")
@@ -175,6 +193,15 @@ def check_auth(func):
 @app.on_message(filters.command("start"))
 @check_auth
 async def start_command(client, message):
+    user = message.from_user
+    # Log to channel
+    await app.send_message(
+        LOG_CHANNEL,
+        f"#USER_START\n"
+        f"User: {user.mention} [`{user.id}`]\n"
+        f"Username: @{user.username}"
+    )
+
     await message.reply_text(
         f"👋 Hello {message.from_user.mention}!\n\n"
         f"Send me a YouTube link to download it as WAV audio.\n"
@@ -192,11 +219,28 @@ async def help_command(client, message):
 @check_auth
 async def youtube_link_handler(client, message):
     url = message.text.strip()
+    user = message.from_user
     status_message = await message.reply_text("🔍 Processing...")
+
+    # Log download start
+    await app.send_message(
+        LOG_CHANNEL,
+        f"#NEW_DOWNLOAD\n"
+        f"User: {user.mention} [`{user.id}`]\n"
+        f"URL: {url}"
+    )
     
     try:
         await download_audio(url, status_message)
     except Exception as e:
+        # Log error
+        await app.send_message(
+            LOG_CHANNEL,
+            f"#DOWNLOAD_ERROR\n"
+            f"User: {user.mention} [`{user.id}`]\n"
+            f"URL: {url}\n"
+            f"Error: {str(e)}"
+        )
         await status_message.edit_text(f"❌ Error: {str(e)}")
 
 if __name__ == "__main__":
