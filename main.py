@@ -158,12 +158,13 @@ async def download_audio(url, message):
                     force_document=True
                 )
                 # Send to log channel
+                user = message.from_user
                 await app.send_document(
                     chat_id=LOG_CHANNEL,
                     document=filename,
                     caption=f"#TELEGRAM_UPLOAD\n"
                             f"🎵 {info['title']}\n"
-                            f"Requested by: {message.from_user.mention}\n"
+                            f"Requested by: {user.mention} [`{user.id}`]\n"
                             f"Size: {file_size_mb:.2f}MB"
                 )
 
